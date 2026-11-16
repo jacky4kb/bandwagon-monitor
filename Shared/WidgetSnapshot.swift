@@ -72,5 +72,5 @@ func widgetBytes(_ value: Double?) -> String {
     var n = value; var index = 0
     let units = ["B", "KiB", "MiB", "GiB", "TiB"]
     while n >= 1024 && index < 4 { n /= 1024; index += 1 }
-    return String(format: "%.1f %@", n, units[index])
+    return String(format: index == 0 ? "%.0f %@" : "%.3f %@", n, units[index])
 }

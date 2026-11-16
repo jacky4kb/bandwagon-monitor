@@ -16,7 +16,7 @@ func bytes(_ n: Double?) -> String {
     let units = ["B", "KiB", "MiB", "GiB", "TiB"]
     var v = n; var index = 0
     while v >= 1024 && index < units.count - 1 { v /= 1024; index += 1 }
-    return String(format: index == 0 ? "%.0f %@" : "%.1f %@", v, units[index])
+    return String(format: index == 0 ? "%.0f %@" : "%.3f %@", v, units[index])
 }
 func dateText(_ value: Any?) -> String {
     guard let n = numeric(value), n > 0 else { return "—" }
@@ -131,6 +131,6 @@ func selfTest() throws {
         do { _ = try APIClient.decode(Data(body.utf8), status: status) } catch { rejected = true }
         try check(rejected, "拒绝错误或无效响应 \(status) \(body)")
     }
-    try check(bytes(1073741824) == "1.0 GiB" && bytes(nil) == "—", "字节显示与未知状态")
+    try check(bytes(1073741824) == "1.000 GiB" && bytes(nil) == "—", "字节显示与未知状态")
     try check(Endpoint.allCases.count == 9 && !Endpoint.allCases.contains { $0.rawValue.contains("exec") }, "仅包含九个查询接口")
 }

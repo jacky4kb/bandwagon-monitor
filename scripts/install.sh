@@ -66,6 +66,9 @@ if extension.exists():
 subprocess.run(['ditto',str(source),str(target)],check=True)
 subprocess.run(['codesign','--verify','--deep','--strict',str(target)],check=True)
 lsregister = '/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister'
+# Keep the build copy out of LaunchServices and the widget gallery.
+subprocess.run(['pluginkit','-r',str(source/'Contents/PlugIns/BandwagonWidgets.appex')],check=False)
+subprocess.run([lsregister,'-u',str(source)],check=False)
 subprocess.run([lsregister,'-f',str(target)],check=True)
 subprocess.run(['pluginkit','-a',str(extension)],check=True)
 service = f'gui/{os.getuid()}/{bundle_id}.autostart'

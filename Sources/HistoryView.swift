@@ -5,6 +5,12 @@ struct HistoryView: View {
     var points: [UsagePoint] { UsageHistory.aggregate(model.usageSamples, days: days) }
     var body: some View {
         Panel(title:"流量走势") {
+            HStack {
+                Metric(title:"昨天流量",value:bytes(UsageHistory.dayTotal(model.usageSamples,offset:-1)))
+                Metric(title:"今天流量",value:bytes(UsageHistory.dayTotal(model.usageSamples,offset:0)))
+            }
+            Text("入站 + 出站；今天为截至统计更新的累计值。无记录显示 —。") .font(.caption).foregroundStyle(.secondary)
+            Divider()
             Picker("时间范围",selection:$days) { Text("24 小时").tag(1); Text("7 天").tag(7); Text("30 天").tag(30) }.pickerStyle(.segmented)
             HStack {
                 Metric(title:"入站合计",value:bytes(points.isEmpty ? nil : points.reduce(0,{$0 + $1.incoming})))

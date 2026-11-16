@@ -11,6 +11,12 @@ struct UsagePoint: Codable, Identifiable {
     var total: Double { incoming + outgoing }
 }
 enum UsageHistory {
+    static func dayTotal(_ samples: [UsagePoint], offset: Int, now: Date = Date(), calendar: Calendar = .current) -> Double? {
+        guard let start = calendar.date(byAdding:.day,value:offset,to:calendar.startOfDay(for:now)),
+              let end = calendar.date(byAdding:.day,value:1,to:start) else { return nil }
+        let matching = samples.filter { $0.time >= start && $0.time < end && $0.time <= now }
+        return matching.isEmpty ? nil : matching.reduce(0) { $0 + $1.total }
+    }
     static func parse(_ payload: [String: Any]) -> [UsagePoint] {
         let rows: [[String: Any]]
         if let list = payload["data"] as? [[String: Any]] { rows = list }
@@ -59,6 +65,16 @@ enum UsageHistory {
         guard gap.count == 2, gap[1].segment == 1 else { throw NSError(domain:"History test",code:3) }
         let data = try JSONEncoder().encode(parsed)
         guard try JSONDecoder().decode([UsagePoint].self,from:data).count == 2 else { throw NSError(domain:"History test",code:4) }
+        var calendar = Calendar(identifier:.gregorian)
+        calendar.timeZone = TimeZone(secondsFromGMT:0)!
+        let now = Date(timeIntervalSince1970:1700049600)
+        let midnight = calendar.startOfDay(for:now)
+        let daily = [UsagePoint(time:midnight.addingTimeInterval(-1),incoming:10,outgoing:20), UsagePoint(time:midnight,incoming:4,outgoing:5)]
+        guard dayTotal(daily,offset:-1,now:now,calendar:calendar) == 30,
+              dayTotal(daily,offset:0,now:now,calendar:calendar) == 9,
+              dayTotal([],offset:0,now:now,calendar:calendar) == nil,
+              dayTotal([UsagePoint(time:midnight,incoming:0,outgoing:0)],offset:0,now:now,calendar:calendar) == 0 else { throw NSError(domain:"Daily totals test",code:1) }
+        print("PASS: 昨天/今天按自然日分界，缺失记录与真实零流量区分")
         print("PASS: 历史解析、字符串数值、去重、无效记录、分桶汇总、缺口断线及缓存编码")
     }
 }

@@ -48,7 +48,7 @@ struct MonitorWidgetView: View {
                 Spacer(minLength: 0)
                 HStack(spacing: 4) {
                     if s.error != nil { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
-                    if let date = s.updated { Text(date, style: .time); Text(entry.date.timeIntervalSince(date) > 20 * 60 ? "数据较旧" : "更新") }
+                    if let date = category == "history" ? s.trendUpdated : s.updated { Text(date, style: .time); Text(entry.date.timeIntervalSince(date) > 20 * 60 ? "数据较旧" : "更新") }
                     else { Text("等待应用同步") }
                     Spacer(minLength: 0)
                     if family != .systemSmall { Text("点击查看详情") }
@@ -103,12 +103,21 @@ struct MonitorWidgetView: View {
     }
     var historyContent: some View {
         VStack(alignment:.leading,spacing:6) {
-            Text("最近 7 天 · 每日流量（GiB）").font(.system(size:10)).foregroundStyle(.secondary)
-            UsageTrend(points:s.trend ?? [],compact:family != .systemLarge).frame(height:family == .systemLarge ? 190 : 55)
-            if let updated = s.trendUpdated {
-                HStack { Text("统计更新"); Text(updated,style:.time) }.font(.system(size:9)).foregroundStyle(.secondary)
+            HStack(spacing:12) {
+                dailyMetric("昨天流量", offset:-1)
+                dailyMetric("今天流量 · 累计", offset:0)
             }
+            Text("最近 7 天 · 每日流量（GiB）").font(.system(size:10)).foregroundStyle(.secondary)
+            UsageTrend(points:s.trend ?? [],compact:family != .systemLarge).frame(height:family == .systemLarge ? 155 : 24)
         }
+    }
+    func dailyMetric(_ title: String, offset: Int) -> some View {
+        VStack(alignment:.leading,spacing:2) {
+            Text(title).font(.system(size:9)).foregroundStyle(.secondary)
+            Text(widgetBytes(UsageHistory.dayTotal(s.trend ?? [],offset:offset,now:entry.date)))
+                .font(.system(size:family == .systemLarge ? 22 : 17,weight:.semibold,design:.rounded))
+                .foregroundStyle(mint).lineLimit(1).minimumScaleFactor(0.7)
+        }.frame(maxWidth:.infinity,alignment:.leading)
     }
     var resetLine: some View {
         HStack(spacing: 3) {

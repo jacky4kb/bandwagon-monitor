@@ -13,7 +13,7 @@ struct MonitorProvider: TimelineProvider {
     }
     func getTimeline(in context: Context, completion: @escaping (Timeline<MonitorEntry>) -> Void) {
         let entry = MonitorEntry(date: Date(), snapshot: WidgetStore.read())
-        completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(15 * 60))))
+        completion(Timeline(entries: [entry], policy: .after(Date().addingTimeInterval(5 * 60))))
     }
 }
 private let mint = Color(red: 0.25, green: 0.85, blue: 0.68)

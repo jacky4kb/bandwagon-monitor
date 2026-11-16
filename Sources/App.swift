@@ -104,8 +104,7 @@ enum Page: String, CaseIterable, Identifiable {
     }
     func refresh(missingOnly: Bool = false, includeOverview: Bool = true) {
         guard !loading, configured, !demo else { return }
-        var endpoints: [Endpoint] = includeOverview ? [.info, .live] : []
-        if includeOverview && (updated[.usage] == nil || Date().timeIntervalSince(updated[.usage]!) >= 900) { endpoints.append(.usage) }
+        var endpoints: [Endpoint] = includeOverview ? [.info, .live, .usage] : []
         for ep in page.endpoints where !endpoints.contains(ep) { endpoints.append(ep) }
         if missingOnly { endpoints = endpoints.filter { data[$0] == nil && errors[$0] == nil } }
         guard !endpoints.isEmpty else { return }

@@ -29,7 +29,7 @@ struct MonitorWidgetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: family == .systemSmall ? 4 : 8) {
             HStack {
-                Label(category == "traffic" ? "搬瓦工流量" : category == "resources" ? "CPU 与内存走势" : category == "history" ? "流量走势" : "VPS 网络", systemImage: "server.rack").font(.system(size: 12, weight: .semibold))
+                Label(category == "traffic" ? "搬瓦工流量" : category == "resources" ? "CPU 与内存走势" : category == "history" ? "流量走势" : category == "budget" ? "流量预算" : category == "today" ? "今日概览" : "VPS 网络", systemImage: "server.rack").font(.system(size: 12, weight: .semibold))
                 Spacer(minLength: 0)
                 if entry.preview { Text("示例").font(.system(size: 9)).foregroundStyle(.secondary) }
             }
@@ -43,11 +43,13 @@ struct MonitorWidgetView: View {
                 case "resources": resourceContent
                 case "network": networkContent
                 case "history": historyContent
+                case "budget": BudgetCard(snapshot:s,now:entry.date,compact:family != .systemLarge)
+                case "today": TodayCard(snapshot:s,now:entry.date,compact:family != .systemLarge)
                 default: trafficContent
                 }
                 Spacer(minLength: 0)
                 HStack(spacing: 4) {
-                    if s.error != nil || (category == "resources" && s.resourceError == true) { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+                    if s.error != nil || (["resources","today","budget"].contains(category) && s.resourceError == true) { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
                     if let date = category == "history" ? s.trendUpdated : category == "resources" ? s.resourceUpdated : s.updated { Text(date, style: .time); Text(entry.date.timeIntervalSince(date) > 20 * 60 ? "数据较旧" : "更新") }
                     else { Text("等待应用同步") }
                     Spacer(minLength: 0)
@@ -213,9 +215,25 @@ struct NetworkWidget: Widget {
             .supportedFamilies([.systemMedium,.systemLarge])
     }
 }
+struct BudgetWidget: Widget {
+    let kind = "BandwagonBudget"
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind:kind,provider:MonitorProvider()) { MonitorWidgetView(entry:$0,category:"budget") }
+            .configurationDisplayName("流量预算").description("每日可用额度、距重置天数与近期用量预测；估算非保证值。")
+            .supportedFamilies([.systemMedium,.systemLarge])
+    }
+}
+struct TodayWidget: Widget {
+    let kind = "BandwagonToday"
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind:kind,provider:MonitorProvider()) { MonitorWidgetView(entry:$0,category:"today") }
+            .configurationDisplayName("今日概览").description("今日累计流量、CPU 和内存使用率及运行状态。")
+            .supportedFamilies([.systemMedium,.systemLarge])
+    }
+}
 #if !WIDGET_PREVIEW
 @main struct BandwagonWidgets: WidgetBundle {
-    var body: some Widget { TrafficWidget(); ResourcesWidget(); NetworkWidget(); HistoryWidget() }
+    var body: some Widget { TrafficWidget(); ResourcesWidget(); NetworkWidget(); HistoryWidget(); BudgetWidget(); TodayWidget() }
 }
 
 #endif

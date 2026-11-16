@@ -26,6 +26,7 @@ enum Page: String, CaseIterable, Identifiable {
     @Published var loading = false
     @Published var page: Page = .overview
     @Published var showSettings = false
+    @Published var showWidgetGuide = false
     @Published var compact = false
     @Published var pinned = false
     @Published var veid = ""
@@ -155,9 +156,8 @@ enum Page: String, CaseIterable, Identifiable {
             if selected != page { refresh(missingOnly: true, includeOverview: false) }
         }
     }
-    func publishWidgetSnapshot() {
-        guard !demo else { return }
-        if configured && data[.info] == nil { return }
+    func makeSnapshot() -> WidgetSnapshot {
+        if demo { return .sample }
         var snapshot = WidgetSnapshot()
         snapshot.configured = configured
         if configured {
@@ -169,6 +169,8 @@ enum Page: String, CaseIterable, Identifiable {
             snapshot.cpuTrend = cpuSamples.filter { $0.time >= Date().addingTimeInterval(-86400) }
             snapshot.trend = UsageHistory.aggregate(usageSamples, days: 7)
             snapshot.trendUpdated = updated[.usage]
+            snapshot.liveUpdated = updated[.live]
+            snapshot.budgetBasis = BudgetBasis.calculate(usageSamples,multiplier:numeric(info["monthly_data_multiplier"]))
             if usageSamples.isEmpty && updated[.usage] == nil {
                 let previous = WidgetStore.read()
                 if previous.instanceID == veid { snapshot.trend = previous.trend; snapshot.trendUpdated = previous.trendUpdated }
@@ -194,7 +196,11 @@ enum Page: String, CaseIterable, Identifiable {
             snapshot.plan = info["plan"] as? String ?? "—"; snapshot.os = info["os"] as? String ?? "—"
             if errors[.info] != nil || errors[.live] != nil { snapshot.error = "更新失败" }
         }
-        do { try WidgetStore.write(snapshot); WidgetCenter.shared.reloadAllTimelines() }
+        return snapshot
+    }
+    func publishWidgetSnapshot() {
+        guard !demo, !configured || data[.info] != nil else { return }
+        do { try WidgetStore.write(makeSnapshot()); WidgetCenter.shared.reloadAllTimelines() }
         catch { message = error.localizedDescription }
     }
     func seedDemo() {
@@ -324,6 +330,7 @@ struct RootView: View {
             footer
         }.background(backdrop).preferredColorScheme(.dark)
             .sheet(isPresented: $model.showSettings) { SettingsView(model: model) }
+            .sheet(isPresented: $model.showWidgetGuide) { WidgetGuideView() }
     }
     var header: some View {
         HStack(spacing: 10) {
@@ -334,6 +341,7 @@ struct RootView: View {
                 Text(model.info["hostname"] as? String ?? "BANDWAGON MONITOR").font(.system(size: 10, weight: .medium)).foregroundStyle(.secondary).lineLimit(1)
             }
             Spacer(minLength: 0)
+            Button { model.showWidgetGuide = true } label: { Image(systemName:"square.grid.2x2") }.help("添加桌面小组件")
             Button { model.pinned.toggle(); model.onUpdate?() } label: { Image(systemName: model.pinned ? "pin.fill" : "pin") }.help("窗口置顶")
             Button { model.compact.toggle(); model.onUpdate?() } label: { Image(systemName: model.compact ? "arrow.up.left.and.arrow.down.right" : "arrow.down.right.and.arrow.up.left") }.help("切换迷你窗口")
             Button { model.showSettings = true } label: { Image(systemName: "gearshape") }.help("设置")
@@ -362,6 +370,9 @@ struct RootView: View {
     }
     var overview: some View {
         Group {
+            Panel(title:"今日概览") { TodayCard(snapshot:model.makeSnapshot()) }
+            Panel(title:"流量预算") { BudgetCard(snapshot:model.makeSnapshot()) }
+            Button("添加桌面小组件 · 查看指引") { model.showWidgetGuide = true }.buttonStyle(.bordered)
             trafficCard
             Panel(title: "运行概况") {
                 HStack {
@@ -592,7 +603,7 @@ struct SettingsView: View {
     @objc func settings() { showWindow(); model.showSettings = true }
     @objc func quit() {
         model.task?.cancel(); model.timer?.invalidate()
-        model.showSettings = false
+        model.showSettings = false; model.showWidgetGuide = false
         if let sheet = window.attachedSheet { window.endSheet(sheet); sheet.orderOut(nil) }
         DispatchQueue.main.asyncAfter(deadline:.now() + 0.15) { NSApp.terminate(nil) }
     }
@@ -603,12 +614,16 @@ struct SettingsView: View {
         let path = CommandLine.arguments[index + 1]
         let pages: [Page] = [.overview, .resources, .network, .history, .backups, .events, .api]
         func capture(_ i: Int) {
-            guard i < pages.count + 2 else { exit(0) }
+            guard i < pages.count + 3 else { exit(0) }
             if i == pages.count { model.compact = true; updateWindow() }
             if i == pages.count + 1 { model.compact = false; updateWindow(); model.showSettings = true }
+            if i == pages.count + 2 {
+                model.showSettings = false
+                DispatchQueue.main.asyncAfter(deadline:.now() + 0.2) { self.model.showWidgetGuide = true }
+            }
             if i < pages.count { model.page = pages[i] }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
-                if let view = window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
+                if let view = window.attachedSheet?.contentView ?? window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
                     view.cacheDisplay(in: view.bounds, to: rep)
                     if let data = rep.representation(using: .png, properties: [:]) {
                         try? data.write(to: URL(fileURLWithPath: path).appendingPathComponent("preview-\(i).png"))
@@ -674,7 +689,7 @@ struct SettingsView: View {
             return
         }
         if CommandLine.arguments.contains("--self-test") {
-            do { try selfTest(); try UsageHistory.test(); try ResourceHistory.test(); try SingleInstance.test(); print("All tests passed.") } catch { fputs("\(error)\n", stderr); exit(1) }
+            do { try selfTest(); try UsageHistory.test(); try ResourceHistory.test(); try TrafficBudget.test(); try SingleInstance.test(); print("All tests passed.") } catch { fputs("\(error)\n", stderr); exit(1) }
             return
         }
         let preview = CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--preview") || Bundle.main.object(forInfoDictionaryKey:"PreviewOnly") as? Bool == true

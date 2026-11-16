@@ -30,6 +30,8 @@ struct WidgetSnapshot: Codable {
     var instanceID: String?
     var trend: [UsagePoint]?
     var trendUpdated: Date?
+    var budgetBasis: BudgetBasis?
+    var liveUpdated: Date?
     var resourceTrend: [ResourcePoint]?
     var cpuTrend: [ResourcePoint]?
     var resourceUpdated: Date?
@@ -52,6 +54,8 @@ struct WidgetSnapshot: Codable {
             s.trend?.append(UsagePoint(time:date,incoming:incoming,outgoing:outgoing))
         }
         s.trendUpdated = Date()
+        s.liveUpdated = Date()
+        s.budgetBasis = BudgetBasis(averagePerDay:20*1073741824,days:6)
         s.resourceTrend = ResourceHistory.demo
         s.cpuTrend = ResourceHistory.demo
         s.resourceUpdated = s.resourceTrend?.last?.time

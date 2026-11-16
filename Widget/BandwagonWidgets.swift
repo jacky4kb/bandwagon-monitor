@@ -45,7 +45,7 @@ struct MonitorWidgetView: View {
                 case "history": historyContent
                 case "budget": BudgetCard(snapshot:s,now:entry.date,compact:family != .systemLarge)
                 case "today": TodayCard(snapshot:s,now:entry.date,compact:family != .systemLarge)
-                case "local": LocalTrafficCard(summary:s.localTraffic,error:s.localTrafficError,compact:family != .systemLarge)
+                case "local": localTrafficContent
                 default: trafficContent
                 }
                 Spacer(minLength: 0)
@@ -64,6 +64,26 @@ struct MonitorWidgetView: View {
         .environment(\.colorScheme, .dark)
         .containerBackground(for: .widget) { Rectangle().fill(Color(red: 0.055, green: 0.085, blue: 0.11).gradient) }
         .widgetURL(URL(string: "bandwagon-monitor://\(category)"))
+    }
+    var localTrafficContent: some View {
+        VStack(alignment:.leading,spacing:family == .systemLarge ? 6 : 3) {
+            if family == .systemLarge {
+                LocalTrafficCard(summary:s.localTraffic,error:s.localTrafficError,compact:true)
+                Text("最近 7 天 · 已记录用量").font(.system(size:10)).foregroundStyle(.secondary)
+                LocalTrafficLegend(compact:true,days:7)
+                LocalTrafficTrend(summary:s.localTraffic,now:entry.date).frame(height:115)
+                Text("今天持续累计；未记录日期留空。").font(.system(size:9)).foregroundStyle(.secondary)
+            } else {
+                HStack {
+                    DashboardMetric(title:"今日上传",value:widgetBytes(s.localTraffic?.todayUpload),compact:true)
+                    DashboardMetric(title:"今日下载",value:widgetBytes(s.localTraffic?.todayDownload),compact:true)
+                }
+                LocalTrafficLegend(compact:true,days:7)
+                LocalTrafficTrend(summary:s.localTraffic,now:entry.date,compact:true).frame(height:24)
+                Text("本月 ↑ \(widgetBytes(s.localTraffic?.monthUpload))  ↓ \(widgetBytes(s.localTraffic?.monthDownload))")
+                    .font(.system(size:9)).foregroundStyle(.secondary).lineLimit(1).minimumScaleFactor(0.7)
+            }
+        }
     }
     var usageBar: some View {
         GeometryReader { proxy in
@@ -236,7 +256,7 @@ struct LocalTrafficWidget: Widget {
     let kind = "BandwagonLocalTraffic"
     var body: some WidgetConfiguration {
         StaticConfiguration(kind:kind,provider:MonitorProvider()) { MonitorWidgetView(entry:$0,category:"local") }
-            .configurationDisplayName("本机流量").description("这台 Mac 的今日和本月上传、下载用量；从开始记录起，与 VPS 独立。")
+            .configurationDisplayName("本机流量").description("这台 Mac 的今日、本月上传下载用量与最近七天每日走势；仅含开始记录后的数据。")
             .supportedFamilies([.systemMedium,.systemLarge])
     }
 }

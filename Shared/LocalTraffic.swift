@@ -54,11 +54,23 @@ struct LocalTrafficArchive: Codable {
             cursor = end
         }
     }
+    func dailyPoints(now: Date = Date()) -> [LocalDailyPoint] {
+        let first = calendar.date(byAdding:.day,value:-89,to:calendar.startOfDay(for:now))!
+        let last = calendar.dateInterval(of:.day,for:now)!.end
+        return days.compactMap { key, day in
+            let parts = key.split(separator:"-").compactMap { Int($0) }
+            guard parts.count == 3,
+                  let date = calendar.date(from:DateComponents(year:parts[0],month:parts[1],day:parts[2])),
+                  dayKey(date) == key, date >= first, date < last,
+                  day.uploaded.isFinite, day.downloaded.isFinite, day.uploaded >= 0, day.downloaded >= 0 else { return nil }
+            return LocalDailyPoint(date:date,uploaded:day.uploaded,downloaded:day.downloaded,estimated:day.estimated)
+        }.sorted { $0.date < $1.date }
+    }
     func summary(now: Date = Date()) -> LocalTrafficSummary {
         let key = dayKey(now), month = String(dayKey(now).prefix(7))
         let today = days[key] ?? LocalDay()
         let monthly = days.filter { $0.key.hasPrefix(month + "-") }.values
-        return LocalTrafficSummary(started:started,updated:sampled,todayUpload:today.uploaded,todayDownload:today.downloaded,monthUpload:monthly.reduce(0){$0+$1.uploaded},monthDownload:monthly.reduce(0){$0+$1.downloaded},estimated:today.estimated || monthly.contains{$0.estimated},discontinuities:discontinuities,timeZoneID:timeZoneID,interfaceCount:counters.count)
+        return LocalTrafficSummary(started:started,updated:sampled,todayUpload:today.uploaded,todayDownload:today.downloaded,monthUpload:monthly.reduce(0){$0+$1.uploaded},monthDownload:monthly.reduce(0){$0+$1.downloaded},estimated:today.estimated || monthly.contains{$0.estimated},discontinuities:discontinuities,timeZoneID:timeZoneID,interfaceCount:counters.count,dailyPoints:dailyPoints(now:now))
     }
 }
 struct LocalTrafficSummary: Codable {
@@ -72,8 +84,19 @@ struct LocalTrafficSummary: Codable {
     var discontinuities: Int
     var timeZoneID: String
     var interfaceCount: Int
+    var dailyPoints: [LocalDailyPoint]? = nil
     static var sample: LocalTrafficSummary {
-        LocalTrafficSummary(started:Date().addingTimeInterval(-3*86400),updated:Date(),todayUpload:1.25*1073741824,todayDownload:8.5*1073741824,monthUpload:4.5*1073741824,monthDownload:28.75*1073741824,estimated:false,discontinuities:0,timeZoneID:TimeZone.current.identifier,interfaceCount:1)
+        let now = Date()
+        var archive = LocalTrafficArchive(started:Calendar.current.startOfDay(for:now).addingTimeInterval(-6*86400),sampled:now,boot:"demo",timeZoneID:TimeZone.current.identifier,counters:[:])
+        let upload = [0.35,0.5,0.8,0.2,0.65,0.75,1.25]
+        let download = [3.0,2.5,4.0,1.25,5.0,4.5,8.5]
+        for i in 0..<7 {
+            let date = archive.calendar.date(byAdding:.day,value:i-6,to:archive.calendar.startOfDay(for:now))!
+            archive.days[archive.dayKey(date)] = LocalDay(uploaded:upload[i]*1073741824,downloaded:download[i]*1073741824)
+        }
+        var summary = archive.summary(now:now)
+        summary.interfaceCount = 1
+        return summary
     }
 }
 enum LocalTrafficStore {
@@ -106,6 +129,15 @@ enum LocalTrafficStore {
         guard a.summary(now:start.addingTimeInterval(110)).todayUpload == 200, a.discontinuities == 2 else { throw NSError(domain:"Counter reset",code:1) }
         a.record(["en0":LocalCounter(index:2,uploaded:999999,downloaded:999999)],boot:"boot-b",at:start.addingTimeInterval(140))
         guard a.summary(now:start.addingTimeInterval(140)).todayUpload == 200 else { throw NSError(domain:"Interface replacement",code:1) }
+        a.days["2025-02-03"] = LocalDay()
+        a.days["invalid"] = LocalDay(uploaded:99)
+        let points = a.dailyPoints(now:start.addingTimeInterval(3*86400))
+        guard points.count == 3, points.last?.uploaded == 0,
+              points.reduce(0,{$0+$1.uploaded}) == 300,
+              !points.contains(where:{a.dayKey($0.date)=="2025-02-02"}) else { throw NSError(domain:"Daily graph",code:1) }
+        let snapshotData = try JSONEncoder().encode(a.summary(now:start.addingTimeInterval(3*86400)))
+        guard try JSONDecoder().decode(LocalTrafficSummary.self,from:snapshotData).dailyPoints?.count == 3 else { throw NSError(domain:"Daily snapshot",code:1) }
+        print("PASS: 本机日图按记录时区排序、真实零值与缺失日期区分、汇总一致及快照编码")
         print("PASS: 本机基线不追溯、跨日跨月分配、持久化恢复、重启与计数器重置、接口替换")
     }
 }
@@ -113,6 +145,7 @@ struct LocalTrafficCard: View {
     var summary: LocalTrafficSummary?
     var error: String? = nil
     var compact = false
+    var details = true
     var body: some View {
         VStack(alignment:.leading,spacing:compact ? 6 : 12) {
             HStack {
@@ -124,7 +157,7 @@ struct LocalTrafficCard: View {
                 DashboardMetric(title:"本月下载",value:widgetBytes(summary?.monthDownload),compact:compact)
             }
             if compact { Text("本机网卡 · 从开始记录起").font(.system(size:8)).foregroundStyle(.secondary) }
-            else {
+            else if details {
                 if let summary {
                     Text("开始记录：\(summary.started.formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary)
                     Text("仅含开始记录后的用量；Wi-Fi / 有线网卡，包含局域网流量。与 VPS 统计独立，不代表本机经 VPS 的用量。").font(.caption).foregroundStyle(.secondary)

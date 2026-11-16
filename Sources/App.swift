@@ -337,11 +337,14 @@ struct RootView: View {
                     else {
                         switch model.page {
                         case .local:
-                            Panel(title:"本机流量 · 独立统计") { LocalTrafficCard(summary:model.localTraffic,error:model.localTrafficError) }
+                            Panel(title:"本机流量 · 独立统计") { LocalTrafficCard(summary:model.localTraffic,error:model.localTrafficError,details:false) }
+                            LocalTrafficHistoryView(summary:model.localTraffic)
                             Panel(title:"统计方式") {
                                 Text("每 30 秒读取系统网卡的 64 位累计字节计数，用前后差值计入用量。无需逐秒累加网速，也不会读取网络内容。Wi-Fi、有线网卡相加；排除 VPN 虚拟接口、回环和 AirDrop，避免重复统计。")
                                 Text("首次读数只作基线。历史保存在本机，退出后同一次系统启动且计数连续时可补回增量；重启或计数重置期间的未知用量不补算。跨日间隔按时间比例分配，可能有估算。")
                                 if let local = model.localTraffic {
+                                    Text("开始记录：\(local.started.formatted(date:.abbreviated,time:.shortened))")
+                                    if local.discontinuities > 0 { Text("曾遇到重启或计数重置，未知区间未补算。").foregroundStyle(.orange) }
                                     InfoRow(label:"分日时区",value:local.timeZoneID)
                                     Text("最后读取：\(local.updated.formatted(date:.abbreviated,time:.shortened))")
                                 }

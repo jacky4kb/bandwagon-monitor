@@ -33,6 +33,7 @@ enum Page: String, CaseIterable, Identifiable {
     @Published var interval = 5
     @Published var usageSamples: [UsagePoint] = []
     @Published var resourceSamples: [ResourcePoint] = []
+    @Published var cpuSamples: [ResourcePoint] = []
     var lastOverviewRequest: Date?
     @Published var showMenuBar = true
     @Published var loginEnabled = false
@@ -61,6 +62,7 @@ enum Page: String, CaseIterable, Identifiable {
     var info: [String: Any] { data[.info] ?? [:] }
     var live: [String: Any] { data[.live] ?? [:] }
     var traffic: Traffic? { Traffic(info) }
+    var memory: MemoryUsage? { MemoryUsage(total:numeric(live["plan_ram"] ?? info["plan_ram"]),available:numeric(live["mem_available_kb"]).map { $0 * 1024 }) }
     var configured: Bool { !veid.isEmpty && !key.isEmpty }
     init(demo: Bool) {
         self.demo = demo
@@ -73,6 +75,7 @@ enum Page: String, CaseIterable, Identifiable {
         do { key = try Vault.read(veid) ?? "" } catch { message = error.localizedDescription }
         showSettings = !configured
         resourceSamples = ResourceHistory.read(instanceID:veid)
+        cpuSamples = ResourceHistory.readCPU(instanceID:veid)
         startTimer()
     }
     func startTimer() {
@@ -97,6 +100,7 @@ enum Page: String, CaseIterable, Identifiable {
         task?.cancel(); loading = false
         veid = id; key = secret; interval = minutes
         resourceSamples = ResourceHistory.read(instanceID:id)
+        cpuSamples = ResourceHistory.readCPU(instanceID:id)
         UserDefaults.standard.set(id, forKey: "veid"); UserDefaults.standard.set(minutes, forKey: "interval")
         data = [:]; errors = [:]; updated = [:]; usageSamples = []; message = nil; showSettings = false
         startTimer(); refresh()
@@ -105,7 +109,7 @@ enum Page: String, CaseIterable, Identifiable {
         guard !demo else { return }
         try Vault.delete(veid)
         task?.cancel(); loading = false
-        resourceSamples = []
+        resourceSamples = []; cpuSamples = []
         do { try ResourceHistory.write([],instanceID:"") }
         catch { message = "本机资源历史清理失败。" }
         key = ""; veid = ""; data = [:]; errors = [:]; updated = [:]; usageSamples = []
@@ -117,7 +121,7 @@ enum Page: String, CaseIterable, Identifiable {
     }
     func refresh(missingOnly: Bool = false, includeOverview: Bool = true, resourcesOnly: Bool = false) {
         guard !loading, configured, !demo else { return }
-        var endpoints: [Endpoint] = resourcesOnly ? [.live] : includeOverview ? [.info, .live, .usage] : []
+        var endpoints: [Endpoint] = resourcesOnly ? [.live, .usage] : includeOverview ? [.info, .live, .usage] : []
         if includeOverview && !resourcesOnly { lastOverviewRequest = Date() }
         for ep in (resourcesOnly ? [] : page.endpoints) where !endpoints.contains(ep) { endpoints.append(ep) }
         if missingOnly { endpoints = endpoints.filter { data[$0] == nil && errors[$0] == nil } }
@@ -130,10 +134,15 @@ enum Page: String, CaseIterable, Identifiable {
                     let result = try await APIClient.fetch(endpoint, veid: id, key: secret)
                     guard !Task.isCancelled, veid == id else { return }
                     data[endpoint] = result; errors[endpoint] = nil; updated[endpoint] = Date()
-                    if endpoint == .usage { usageSamples = UsageHistory.parse(result) }
+                    if endpoint == .usage {
+                        usageSamples = UsageHistory.parse(result)
+                        cpuSamples = ResourceHistory.mergeCPU(ResourceHistory.cpuSamples(result),previous:cpuSamples)
+                        do { try ResourceHistory.write(resourceSamples,instanceID:id,cpuPoints:cpuSamples) }
+                        catch { message = "资源历史保存失败，请检查本机存储。" }
+                    }
                     if endpoint == .live, let point = ResourceHistory.sample(result) {
                         resourceSamples = ResourceHistory.append(point,to:resourceSamples)
-                        do { try ResourceHistory.write(resourceSamples,instanceID:id) }
+                        do { try ResourceHistory.write(resourceSamples,instanceID:id,cpuPoints:cpuSamples) }
                         catch { message = "资源历史保存失败，请检查本机存储。" }
                     }
                 } catch {
@@ -156,7 +165,8 @@ enum Page: String, CaseIterable, Identifiable {
             snapshot.instanceID = veid
             snapshot.resourceTrend = resourceSamples.filter { $0.time >= Date().addingTimeInterval(-86400) }
             snapshot.resourceUpdated = resourceSamples.last?.time
-            snapshot.resourceError = errors[.live] != nil
+            snapshot.resourceError = errors[.live] != nil || errors[.usage] != nil
+            snapshot.cpuTrend = cpuSamples.filter { $0.time >= Date().addingTimeInterval(-86400) }
             snapshot.trend = UsageHistory.aggregate(usageSamples, days: 7)
             snapshot.trendUpdated = updated[.usage]
             if usageSamples.isEmpty && updated[.usage] == nil {
@@ -189,6 +199,7 @@ enum Page: String, CaseIterable, Identifiable {
     }
     func seedDemo() {
         resourceSamples = ResourceHistory.demo
+        cpuSamples = ResourceHistory.demo
         veid = "1234567"
         data[.info] = ["error":0,"hostname":"My Bandwagon VPS","node_alias":"v1234","node_location":"US, Los Angeles","vm_type":"kvm","plan":"KVM • 2 GB / 40 GB","plan_ram":2147483648.0,"plan_swap":1073741824,"plan_disk":42949672960.0,"plan_monthly_data":1073741824000.0,"data_counter":289910292480.0,"monthly_data_multiplier":1,"data_next_reset":Date().addingTimeInterval(12*86400).timeIntervalSince1970,"ip_addresses":["192.0.2.10","2001:db8::/64"],"private_ip_addresses":[],"os":"debian-12-x86_64","suspended":0,"policy_violation":0,"ptr":["192.0.2.10":"vps.example.com"],"ip_nullroutes":[:],"email":"demo@example.com"]
         data[.live] = ["error":0,"ve_status":"Running","load_average":"0.08 0.12 0.09","mem_available_kb":1468006,"swap_total_kb":1048576,"swap_available_kb":1048576,"ve_used_disk_space_b":12884901888.0,"ve_disk_quota_gb":40,"is_cpu_throttled":0,"is_disk_throttled":0,"ssh_port":22,"live_hostname":"my-vps"]
@@ -356,7 +367,7 @@ struct RootView: View {
                 HStack {
                     Metric(title: "运行状态", value: stateText)
                     Metric(title: "系统负载", value: value("load_average", live: true))
-                    Metric(title: "可用内存", value: bytes(numeric(model.live["mem_available_kb"]).map { $0 * 1024 }))
+                    Metric(title: "已用内存", value: bytes(model.memory?.used))
                 }
                 Divider()
                 InfoRow(label: "CPU / 磁盘限速", value: "\(flag("is_cpu_throttled", live: true)) / \(flag("is_disk_throttled", live: true))")
@@ -377,10 +388,11 @@ struct RootView: View {
     }
     var resources: some View {
         Group {
-            ResourceHistoryPanel(points:model.resourceSamples)
+            ResourceHistoryPanel(points:model.resourceSamples,cpuPoints:model.cpuSamples)
             Panel(title: "内存与存储") {
                 InfoRow(label: "内存额度", value: bytes(numeric(model.info["plan_ram"])))
-                InfoRow(label: "可用内存", value: bytes(numeric(model.live["mem_available_kb"]).map { $0 * 1024 }))
+                InfoRow(label: "已用内存", value: bytes(model.memory?.used))
+                InfoRow(label: "内存使用率", value: memoryPercent(model.memory))
                 InfoRow(label: "Swap 额度", value: bytes(numeric(model.info["plan_swap"])))
                 InfoRow(label: "Swap 可用 / 总量", value: "\(bytes(numeric(model.live["swap_available_kb"]).map { $0 * 1024 })) / \(bytes(numeric(model.live["swap_total_kb"]).map { $0 * 1024 }))")
                 InfoRow(label: "磁盘套餐额度", value: bytes(numeric(model.info["plan_disk"])))
@@ -625,6 +637,27 @@ struct SettingsView: View {
         if CommandLine.arguments.contains("--runtime-status") {
             let snapshot = WidgetStore.read()
             print("Login: \(BackgroundService.statusText); menu visible: \(UserDefaults.standard.object(forKey: "showMenuBar") as? Bool ?? true); configured: \(snapshot.configured); trend points: \(snapshot.trend?.count ?? 0)")
+            return
+        }
+        if CommandLine.arguments.contains("--api-schema") {
+            Task { @MainActor in
+                do {
+                    let id = UserDefaults.standard.string(forKey:"veid") ?? ""
+                    guard !id.isEmpty, let key = try Vault.read(id) else { exit(1) }
+                    for endpoint in [Endpoint.info, .live, .usage] {
+                        let data = try await APIClient.fetch(endpoint,veid:id,key:key)
+                        print(endpoint.rawValue + " fields: " + data.keys.sorted().joined(separator:", "))
+                        if endpoint == .usage {
+                            let rows = data["data"] as? [[String:Any]] ?? Array((data["data"] as? [String:[String:Any]] ?? [:]).values)
+                            print("Usage sample fields: " + Set(rows.flatMap { $0.keys }).sorted().joined(separator:", "))
+                            let cpu = rows.compactMap { numeric($0["cpu_usage"]) }
+                            print("CPU field present: \( !cpu.isEmpty); all between 0 and 100: \( !cpu.isEmpty && cpu.allSatisfy { $0 >= 0 && $0 <= 100 }); values above 1000: \(cpu.contains { $0 > 1000 })")
+                        }
+                    }
+                    exit(0)
+                } catch { print("API schema inspection failed"); exit(1) }
+            }
+            NSApplication.shared.run()
             return
         }
         if CommandLine.arguments.contains("--widget-check") {

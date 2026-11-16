@@ -12,6 +12,7 @@ struct WidgetSnapshot: Codable {
     var load = "—"
     var availableRAM: Double?
     var totalRAM: Double?
+    var memory: MemoryUsage? { MemoryUsage(total:totalRAM,available:availableRAM) }
     var availableSwap: Double?
     var totalSwap: Double?
     var mappedDisk: Double?
@@ -30,6 +31,7 @@ struct WidgetSnapshot: Codable {
     var trend: [UsagePoint]?
     var trendUpdated: Date?
     var resourceTrend: [ResourcePoint]?
+    var cpuTrend: [ResourcePoint]?
     var resourceUpdated: Date?
     var resourceError: Bool?
     static var sample: WidgetSnapshot {
@@ -51,6 +53,7 @@ struct WidgetSnapshot: Codable {
         }
         s.trendUpdated = Date()
         s.resourceTrend = ResourceHistory.demo
+        s.cpuTrend = ResourceHistory.demo
         s.resourceUpdated = s.resourceTrend?.last?.time
         return s
     }

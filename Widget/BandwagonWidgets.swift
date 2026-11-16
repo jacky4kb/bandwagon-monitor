@@ -29,7 +29,7 @@ struct MonitorWidgetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: family == .systemSmall ? 4 : 8) {
             HStack {
-                Label(category == "traffic" ? "搬瓦工流量" : category == "resources" ? "VPS 资源" : category == "history" ? "流量走势" : "VPS 网络", systemImage: "server.rack").font(.system(size: 12, weight: .semibold))
+                Label(category == "traffic" ? "搬瓦工流量" : category == "resources" ? "CPU 与内存走势" : category == "history" ? "流量走势" : "VPS 网络", systemImage: "server.rack").font(.system(size: 12, weight: .semibold))
                 Spacer(minLength: 0)
                 if entry.preview { Text("示例").font(.system(size: 9)).foregroundStyle(.secondary) }
             }
@@ -96,7 +96,7 @@ struct MonitorWidgetView: View {
                 row("已用 / 总额", "\(widgetBytes(s.used)) / \(widgetBytes(s.total))")
                 Divider()
                 UsageTrend(points:s.trend ?? [],compact:false).frame(height:100)
-                row("状态 / 可用内存", "\(s.state) / \(widgetBytes(s.availableRAM))")
+                row("已用内存 / 使用率", "\(widgetBytes(s.memory?.used)) / \(memoryPercent(s.memory))")
                 row("CPU / 磁盘限速", "\(flag(s.cpuThrottled)) / \(flag(s.diskThrottled))")
             }
         }
@@ -143,16 +143,17 @@ struct MonitorWidgetView: View {
         }
     }
     func resourcePlot(memory: Bool) -> some View {
-        let points = (s.resourceTrend ?? []).filter { $0.time >= entry.date.addingTimeInterval(-86400) }
+        let points = ((memory ? s.resourceTrend : s.cpuTrend) ?? []).filter { $0.time >= entry.date.addingTimeInterval(-86400) }
         let latest = points.last
         return VStack(alignment:.leading,spacing:3) {
             HStack {
-                Text(memory ? "可用内存 · GiB" : "CPU 负载 · 1 分钟")
+                Text(memory ? "已用内存 · 使用率" : "CPU 使用率 · %")
                 if family == .systemLarge { Spacer(minLength:0) }
             }.font(.system(size:9)).foregroundStyle(.secondary)
-            Text(memory ? widgetBytes(latest?.availableRAM) : latest?.load.map { String(format:"%.3f",$0) } ?? "—")
+            Text(memory ? "\(widgetBytes(latest?.memory?.used)) · \(memoryPercent(latest?.memory))" : latest?.cpuPercent.map { String(format:"%.1f%%",$0) } ?? "—")
                 .font(.system(size:17,weight:.semibold,design:.rounded)).foregroundStyle(memory ? Color.blue : mint).lineLimit(1).minimumScaleFactor(0.6)
-            ResourceTrend(points:points,memory:memory,compact:true).frame(height:family == .systemLarge ? 54 : 32)
+            ResourceTrend(points:points,memory:memory,compact:true).frame(height:family == .systemLarge ? 48 : 23)
+            if let date = latest?.time { Text(date,style:.time).font(.system(size:8)).foregroundStyle(.secondary) }
         }.frame(maxWidth:.infinity,alignment:.leading)
     }
     var networkContent: some View {
@@ -200,7 +201,7 @@ struct ResourcesWidget: Widget {
     let kind = "BandwagonResources"
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: MonitorProvider()) { MonitorWidgetView(entry: $0, category: "resources") }
-            .configurationDisplayName("VPS 资源").description("最近 24 小时 CPU 系统负载与可用内存走势；每 5 分钟采样，负载非使用率百分比。")
+            .configurationDisplayName("CPU 与内存走势图").description("最近 24 小时 CPU 使用率与内存使用率走势、已用内存；每 5 分钟刷新。")
             .supportedFamilies([.systemMedium,.systemLarge])
     }
 }

@@ -23,27 +23,31 @@ struct HistoryView: View {
             if let updated = model.updated[.usage] { Text("统计更新：\(updated.formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary) }
             Text("按 API 原始入站与出站字节汇总，不套用套餐换算系数；当前时段未结束，缺失时段不补零。") .font(.caption).foregroundStyle(.secondary)
         }
-        ResourceHistoryPanel(points:model.resourceSamples)
+        ResourceHistoryPanel(points:model.resourceSamples,cpuPoints:model.cpuSamples)
         }
     }
 }
 
 struct ResourceHistoryPanel: View {
     var points: [ResourcePoint]
+    var cpuPoints: [ResourcePoint]
+    var cpuRecent: [ResourcePoint] { cpuPoints.filter { $0.time >= Date().addingTimeInterval(-86400) } }
     var recent: [ResourcePoint] { points.filter { $0.time >= Date().addingTimeInterval(-86400) } }
     var body: some View {
-        Panel(title:"CPU 负载与内存走势") {
+        Panel(title:"CPU 与内存走势") {
             Text("最近 24 小时 · 每 5 分钟采样").font(.caption).foregroundStyle(.secondary)
             HStack {
-                Metric(title:"CPU 系统负载 · 1 分钟",value:recent.last?.load.map { String(format:"%.3f",$0) } ?? "—")
-                Metric(title:"可用内存",value:bytes(recent.last?.availableRAM))
+                Metric(title:"CPU 使用率",value:cpuRecent.last?.cpuPercent.map { String(format:"%.1f%%",$0) } ?? "—")
+                Metric(title:"已用内存",value:bytes(recent.last?.memory?.used))
+                Metric(title:"内存使用率",value:memoryPercent(recent.last?.memory))
             }
-            Text("CPU 系统负载（非使用率 %）").font(.caption).foregroundStyle(.secondary)
-            ResourceTrend(points:recent).frame(height:140)
-            Text("可用内存 · GiB").font(.caption).foregroundStyle(.secondary)
+            Text("CPU 使用率 · API 统计值（%）").font(.caption).foregroundStyle(.secondary)
+            ResourceTrend(points:cpuRecent).frame(height:140)
+            if let date = cpuRecent.last?.time { Text("CPU 采样：\(date.formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary) }
+            Text("内存使用率 · %").font(.caption).foregroundStyle(.secondary)
             ResourceTrend(points:recent,memory:true).frame(height:140)
-            if let date = recent.last?.time { Text("采样更新：\(date.formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary) }
-            Text("历史从启用后累积，本机保留 30 天；休眠、退出或请求失败期间不补点。首个采样显示为单点。").font(.caption).foregroundStyle(.secondary)
+            if let date = recent.last?.time { Text("内存采样：\(date.formatted(date:.abbreviated,time:.shortened))").font(.caption).foregroundStyle(.secondary) }
+            Text("CPU 使用历史接口原始百分比；内存已用量＝套餐额度－可用内存，使用率以额度为分母。内存历史从启用后累积；缺失不补零，本机保留 30 天。").font(.caption).foregroundStyle(.secondary)
         }
     }
 }

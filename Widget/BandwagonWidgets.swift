@@ -29,11 +29,11 @@ struct MonitorWidgetView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: family == .systemSmall ? 4 : 8) {
             HStack {
-                Label(category == "traffic" ? "搬瓦工流量" : category == "resources" ? "CPU 与内存走势" : category == "history" ? "流量走势" : category == "budget" ? "流量预算" : category == "today" ? "今日概览" : "VPS 网络", systemImage: "server.rack").font(.system(size: 12, weight: .semibold))
+                Label(category == "traffic" ? "搬瓦工流量" : category == "resources" ? "CPU 与内存走势" : category == "history" ? "流量走势" : category == "budget" ? "流量预算" : category == "today" ? "今日概览" : category == "local" ? "本机流量" : "VPS 网络", systemImage: "server.rack").font(.system(size: 12, weight: .semibold))
                 Spacer(minLength: 0)
                 if entry.preview { Text("示例").font(.system(size: 9)).foregroundStyle(.secondary) }
             }
-            if !s.configured {
+            if !s.configured && category != "local" {
                 Spacer(minLength: 0)
                 Text("连接你的 VPS").font(.system(size: 18, weight: .semibold))
                 Text("点击打开应用，填写 VEID 和 API Key。") .font(.system(size: 12)).foregroundStyle(.secondary)
@@ -45,17 +45,18 @@ struct MonitorWidgetView: View {
                 case "history": historyContent
                 case "budget": BudgetCard(snapshot:s,now:entry.date,compact:family != .systemLarge)
                 case "today": TodayCard(snapshot:s,now:entry.date,compact:family != .systemLarge)
+                case "local": LocalTrafficCard(summary:s.localTraffic,error:s.localTrafficError,compact:family != .systemLarge)
                 default: trafficContent
                 }
                 Spacer(minLength: 0)
                 HStack(spacing: 4) {
-                    if s.error != nil || (["resources","today","budget"].contains(category) && s.resourceError == true) { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
-                    if let date = category == "history" ? s.trendUpdated : category == "resources" ? s.resourceUpdated : s.updated { Text(date, style: .time); Text(entry.date.timeIntervalSince(date) > 20 * 60 ? "数据较旧" : "更新") }
+                    if category == "local" ? s.localTrafficError != nil : (s.error != nil || (["resources","today","budget"].contains(category) && s.resourceError == true)) { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+                    if let date = category == "local" ? s.localTraffic?.updated : category == "history" ? s.trendUpdated : category == "resources" ? s.resourceUpdated : s.updated { Text(date, style: .time); Text(entry.date.timeIntervalSince(date) > 20 * 60 ? "数据较旧" : "更新") }
                     else { Text("等待应用同步") }
                     Spacer(minLength: 0)
                     if family != .systemSmall { Text("点击查看详情") }
                 }.font(.system(size: 9)).foregroundStyle(.secondary)
-                if family != .systemSmall, let date = s.updated, entry.date.timeIntervalSince(date) > 20 * 60 {
+                if family != .systemSmall, let date = (category == "local" ? s.localTraffic?.updated : s.updated), entry.date.timeIntervalSince(date) > 20 * 60 {
                     Text("数据较旧，请打开应用刷新").font(.system(size: 9)).foregroundStyle(.orange)
                 }
             }
@@ -231,9 +232,17 @@ struct TodayWidget: Widget {
             .supportedFamilies([.systemMedium,.systemLarge])
     }
 }
+struct LocalTrafficWidget: Widget {
+    let kind = "BandwagonLocalTraffic"
+    var body: some WidgetConfiguration {
+        StaticConfiguration(kind:kind,provider:MonitorProvider()) { MonitorWidgetView(entry:$0,category:"local") }
+            .configurationDisplayName("本机流量").description("这台 Mac 的今日和本月上传、下载用量；从开始记录起，与 VPS 独立。")
+            .supportedFamilies([.systemMedium,.systemLarge])
+    }
+}
 #if !WIDGET_PREVIEW
 @main struct BandwagonWidgets: WidgetBundle {
-    var body: some Widget { TrafficWidget(); ResourcesWidget(); NetworkWidget(); HistoryWidget(); BudgetWidget(); TodayWidget() }
+    var body: some Widget { TrafficWidget(); ResourcesWidget(); NetworkWidget(); HistoryWidget(); BudgetWidget(); TodayWidget(); LocalTrafficWidget() }
 }
 
 #endif

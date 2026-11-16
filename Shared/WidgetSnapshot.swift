@@ -2,6 +2,8 @@ import Foundation
 
 struct WidgetSnapshot: Codable {
     var configured = false
+    var localTraffic: LocalTrafficSummary?
+    var localTrafficError: String?
     var updated: Date?
     var hostname = "搬瓦工 VPS"
     var remaining: Double?
@@ -38,6 +40,7 @@ struct WidgetSnapshot: Codable {
     var resourceError: Bool?
     static var sample: WidgetSnapshot {
         var s = WidgetSnapshot()
+        s.localTraffic = .sample
         s.configured = true; s.updated = Date(); s.hostname = "示例 VPS"
         s.total = 1000 * 1073741824; s.used = 270 * 1073741824; s.remaining = 730 * 1073741824
         s.reset = Date().addingTimeInterval(12 * 86400).timeIntervalSince1970
@@ -68,7 +71,11 @@ enum WidgetStore {
         return FileManager.default.containerURL(forSecurityApplicationGroupIdentifier: group)
     }
     static func read() -> WidgetSnapshot {
-        guard let path = directory?.appendingPathComponent("widget-snapshot.json"), let data = try? Data(contentsOf: path), let value = try? JSONDecoder().decode(WidgetSnapshot.self, from: data) else { return WidgetSnapshot() }
+        var value = WidgetSnapshot()
+        if let path = directory?.appendingPathComponent("widget-snapshot.json"), let data = try? Data(contentsOf:path), let stored = try? JSONDecoder().decode(WidgetSnapshot.self,from:data) { value = stored }
+        do {
+            if let archive = try LocalTrafficStore.read() { value.localTraffic = archive.summary(); value.localTrafficError = nil }
+        } catch { value.localTrafficError = "本机历史读取失败" }
         return value
     }
     static func write(_ snapshot: WidgetSnapshot) throws {

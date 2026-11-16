@@ -5,10 +5,11 @@ import WidgetKit
 import ServiceManagement
 
 enum Page: String, CaseIterable, Identifiable {
-    case overview = "总览", resources = "资源", network = "网络", history = "统计", backups = "备份", events = "日志", api = "API"
+    case local = "本机", overview = "总览", resources = "资源", network = "网络", history = "统计", backups = "备份", events = "日志", api = "API"
     var id: String { rawValue }
     var endpoints: [Endpoint] {
         switch self {
+        case .local: return []
         case .overview, .resources: return [.info, .live]
         case .network: return [.info]
         case .history: return [.usage]
@@ -27,6 +28,11 @@ enum Page: String, CaseIterable, Identifiable {
     @Published var page: Page = .overview
     @Published var showSettings = false
     @Published var showWidgetGuide = false
+    @Published var localTraffic: LocalTrafficSummary?
+    @Published var localTrafficError: String?
+    var localArchive: LocalTrafficArchive?
+    var localTimer: Timer?
+    var lastLocalWidgetReload: Date?
     @Published var compact = false
     @Published var pinned = false
     @Published var veid = ""
@@ -78,6 +84,28 @@ enum Page: String, CaseIterable, Identifiable {
         resourceSamples = ResourceHistory.read(instanceID:veid)
         cpuSamples = ResourceHistory.readCPU(instanceID:veid)
         startTimer()
+        sampleLocalTraffic()
+        localTimer = Timer.scheduledTimer(withTimeInterval:30,repeats:true) { [weak self] _ in
+            Task { @MainActor in self?.sampleLocalTraffic() }
+        }
+        localTimer?.tolerance = 2
+    }
+    func sampleLocalTraffic() {
+        guard !demo else { return }
+        do {
+            let reading = try LocalTrafficReader.read()
+            let now = Date()
+            var archive = try localArchive ?? LocalTrafficStore.read()
+            if archive == nil {
+                archive = LocalTrafficArchive(started:now,sampled:now,boot:reading.boot,timeZoneID:TimeZone.current.identifier,counters:reading.counters)
+            } else { archive?.record(reading.counters,boot:reading.boot,at:now) }
+            guard let archive else { return }
+            try LocalTrafficStore.write(archive)
+            localArchive = archive; localTraffic = archive.summary(now:now); localTrafficError = nil
+            if lastLocalWidgetReload == nil || now.timeIntervalSince(lastLocalWidgetReload!) >= 300 {
+                WidgetCenter.shared.reloadTimelines(ofKind:"BandwagonLocalTraffic"); lastLocalWidgetReload = now
+            }
+        } catch { localTrafficError = "本机统计读取或保存失败，已有历史未覆盖。" }
     }
     func startTimer() {
         timer?.invalidate()
@@ -159,6 +187,8 @@ enum Page: String, CaseIterable, Identifiable {
     func makeSnapshot() -> WidgetSnapshot {
         if demo { return .sample }
         var snapshot = WidgetSnapshot()
+        snapshot.localTraffic = localTraffic
+        snapshot.localTrafficError = localTrafficError
         snapshot.configured = configured
         if configured {
             snapshot.updated = updated[.info]
@@ -204,6 +234,7 @@ enum Page: String, CaseIterable, Identifiable {
         catch { message = error.localizedDescription }
     }
     func seedDemo() {
+        localTraffic = .sample
         resourceSamples = ResourceHistory.demo
         cpuSamples = ResourceHistory.demo
         veid = "1234567"
@@ -295,7 +326,7 @@ struct RootView: View {
             }
             ScrollView {
                 VStack(spacing: 12) {
-                    if !model.configured && !model.demo {
+                    if !model.configured && !model.demo && model.page != .local {
                         Panel(title: "连接你的搬瓦工 VPS") {
                             Text("填入 KiwiVM 的 VEID 和 API Key，即可查看流量与运行状态。")
                                 .font(.system(size: 14)).foregroundStyle(.secondary)
@@ -305,6 +336,16 @@ struct RootView: View {
                     if model.compact { trafficCard }
                     else {
                         switch model.page {
+                        case .local:
+                            Panel(title:"本机流量 · 独立统计") { LocalTrafficCard(summary:model.localTraffic,error:model.localTrafficError) }
+                            Panel(title:"统计方式") {
+                                Text("每 30 秒读取系统网卡的 64 位累计字节计数，用前后差值计入用量。无需逐秒累加网速，也不会读取网络内容。Wi-Fi、有线网卡相加；排除 VPN 虚拟接口、回环和 AirDrop，避免重复统计。")
+                                Text("首次读数只作基线。历史保存在本机，退出后同一次系统启动且计数连续时可补回增量；重启或计数重置期间的未知用量不补算。跨日间隔按时间比例分配，可能有估算。")
+                                if let local = model.localTraffic {
+                                    InfoRow(label:"分日时区",value:local.timeZoneID)
+                                    Text("最后读取：\(local.updated.formatted(date:.abbreviated,time:.shortened))")
+                                }
+                            }.font(.caption).foregroundStyle(.secondary)
                         case .overview: overview
                         case .resources: resources
                         case .network: network
@@ -447,11 +488,11 @@ struct RootView: View {
     }
     var footer: some View {
         HStack {
-            Circle().fill(model.errors.isEmpty ? (model.configured || model.demo ? accent : Color.gray) : Color.orange).frame(width: 6, height: 6)
-            Text(model.loading ? "正在更新…" : model.errors.isEmpty ? "每 \(model.interval) 分钟刷新" : "部分数据更新失败") .font(.system(size: 10)).foregroundStyle(.secondary)
+            Circle().fill(model.page == .local ? (model.localTrafficError == nil ? accent : Color.orange) : (model.errors.isEmpty ? (model.configured || model.demo ? accent : Color.gray) : Color.orange)).frame(width: 6, height: 6)
+            Text(model.page == .local ? (model.localTrafficError == nil ? "每 30 秒读取系统计数" : "本机统计更新失败") : (model.loading ? "正在更新…" : model.errors.isEmpty ? "每 \(model.interval) 分钟刷新" : "部分数据更新失败")) .font(.system(size: 10)).foregroundStyle(.secondary)
             Spacer()
-            Button { model.refresh() } label: { Label("刷新", systemImage: "arrow.clockwise").font(.system(size: 11)) }
-                .buttonStyle(.plain).disabled(model.loading || !model.configured || model.demo)
+            Button { if model.page == .local { model.sampleLocalTraffic() } else { model.refresh() } } label: { Label("刷新", systemImage: "arrow.clockwise").font(.system(size: 11)) }
+                .buttonStyle(.plain).disabled(model.demo || (model.page != .local && (model.loading || !model.configured)))
         }.padding(.horizontal, 20).padding(.vertical, 12).background(Color.white.opacity(0.025))
     }
 }
@@ -590,7 +631,8 @@ struct SettingsView: View {
     }
     func application(_ application: NSApplication, open urls: [URL]) {
         guard let url = urls.first, url.scheme == "bandwagon-monitor" else { return }
-        if url.host == "history" { model.select(.history) }
+        if url.host == "local" { model.compact = false; model.select(.local); updateWindow() }
+        else if url.host == "history" { model.select(.history) }
         else if url.host == "resources" { model.select(.resources) }
         else if url.host == "network" { model.select(.network) }
         else { model.select(.overview) }
@@ -599,28 +641,29 @@ struct SettingsView: View {
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool { showWindow(); return true }
     func applicationDidBecomeActive(_ notification: Notification) { model?.refreshLoginStatus() }
     @objc func showWindow() { window.makeKeyAndOrderFront(nil); NSApp.activate(ignoringOtherApps: true) }
-    @objc func refresh() { model.refresh() }
+    @objc func refresh() { model.sampleLocalTraffic(); model.refresh() }
     @objc func settings() { showWindow(); model.showSettings = true }
     @objc func quit() {
-        model.task?.cancel(); model.timer?.invalidate()
+        model.sampleLocalTraffic(); model.localTimer?.invalidate(); model.task?.cancel(); model.timer?.invalidate()
         model.showSettings = false; model.showWidgetGuide = false
         if let sheet = window.attachedSheet { window.endSheet(sheet); sheet.orderOut(nil) }
         DispatchQueue.main.asyncAfter(deadline:.now() + 0.15) { NSApp.terminate(nil) }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { false }
-    func applicationWillTerminate(_ notification: Notification) { model?.task?.cancel(); model?.timer?.invalidate() }
+    func applicationWillTerminate(_ notification: Notification) { model?.sampleLocalTraffic(); model?.localTimer?.invalidate(); model?.task?.cancel(); model?.timer?.invalidate() }
     func capturePreviews() {
         guard let index = CommandLine.arguments.firstIndex(of: "--preview"), CommandLine.arguments.count > index + 1 else { return }
         let path = CommandLine.arguments[index + 1]
         let pages: [Page] = [.overview, .resources, .network, .history, .backups, .events, .api]
         func capture(_ i: Int) {
-            guard i < pages.count + 3 else { exit(0) }
+            guard i < pages.count + 4 else { exit(0) }
             if i == pages.count { model.compact = true; updateWindow() }
             if i == pages.count + 1 { model.compact = false; updateWindow(); model.showSettings = true }
             if i == pages.count + 2 {
                 model.showSettings = false
                 DispatchQueue.main.asyncAfter(deadline:.now() + 0.2) { self.model.showWidgetGuide = true }
             }
+            if i == pages.count + 3 { model.showWidgetGuide = false; model.page = .local }
             if i < pages.count { model.page = pages[i] }
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [self] in
                 if let view = window.attachedSheet?.contentView ?? window.contentView, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) {
@@ -689,7 +732,7 @@ struct SettingsView: View {
             return
         }
         if CommandLine.arguments.contains("--self-test") {
-            do { try selfTest(); try UsageHistory.test(); try ResourceHistory.test(); try TrafficBudget.test(); try SingleInstance.test(); print("All tests passed.") } catch { fputs("\(error)\n", stderr); exit(1) }
+            do { try selfTest(); try UsageHistory.test(); try ResourceHistory.test(); try TrafficBudget.test(); try LocalTrafficStore.test(); try SingleInstance.test(); print("All tests passed.") } catch { fputs("\(error)\n", stderr); exit(1) }
             return
         }
         let preview = CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--preview") || Bundle.main.object(forInfoDictionaryKey:"PreviewOnly") as? Bool == true

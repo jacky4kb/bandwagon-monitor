@@ -17,7 +17,8 @@ cp "$BUILD_DIR/app-previews/preview-2.png" "$ROOT/docs/screenshots/network.png"
 cp "$BUILD_DIR/app-previews/preview-3.png" "$ROOT/docs/screenshots/history.png"
 cp "$BUILD_DIR/app-previews/preview-7.png" "$ROOT/docs/screenshots/mini-window.png"
 cp "$BUILD_DIR/app-previews/preview-9.png" "$ROOT/docs/screenshots/widget-guide.png"
-for i in {0..12}; do
+cp "$BUILD_DIR/app-previews/preview-10.png" "$ROOT/docs/screenshots/local-traffic.png"
+for i in {0..14}; do
   cp "$BUILD_DIR/widget-previews/widget-$i.png" "$ROOT/docs/screenshots/widget-$i.png"
 done
 python3 "$ROOT/scripts/strip-png-metadata.py" "$ROOT/docs/screenshots"

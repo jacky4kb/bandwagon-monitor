@@ -4,6 +4,7 @@ import WidgetKit
 struct WidgetGuideView: View {
     @Environment(\.dismiss) private var dismiss
     private let cards = [
+        ("local","本机流量","中 / 大","这台 Mac 的今日、本月上传和下载；与 VPS 独立。"),
         ("today","今日概览","中 / 大","今日流量、CPU%、内存%和运行状态。"),
         ("budget","流量预算","中 / 大","每日可用额度、重置倒计时与近期用量预测。"),
         ("traffic","搬瓦工流量","小 / 中 / 大","剩余流量与近七天趋势。"),

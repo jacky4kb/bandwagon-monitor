@@ -14,7 +14,7 @@ mkdir -p "$OUT/.build"
 APP="$OUT/搬瓦工监控.app"
 EXT="$APP/Contents/PlugIns/BandwagonWidgets.appex"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$EXT/Contents/MacOS"
-swiftc -D WIDGET_PREVIEW -swift-version 5 -target arm64-apple-macosx14.0 -O -module-cache-path "$OUT/.build/module-cache" -framework AppKit -framework SwiftUI -framework Security -framework ServiceManagement -framework Charts -framework WidgetKit Sources/*.swift Shared/*.swift Widget/BandwagonWidgets.swift -o "$APP/Contents/MacOS/BandwagonMonitor"
+swiftc -D WIDGET_PREVIEW -swift-version 5 -target arm64-apple-macosx14.0 -O -module-cache-path "$OUT/.build/module-cache" -framework AppKit -framework SwiftUI -framework Security -framework ServiceManagement -framework SystemConfiguration -framework Charts -framework WidgetKit Sources/*.swift Shared/*.swift Widget/BandwagonWidgets.swift -o "$APP/Contents/MacOS/BandwagonMonitor"
 if [[ "${BUILD_UNSIGNED:-0}" != 1 ]]; then
 swiftc -swift-version 5 -target arm64-apple-macosx14.0 -application-extension -Xlinker -e -Xlinker _NSExtensionMain -Xlinker -u -Xlinker _main -O -module-cache-path "$OUT/.build/module-cache" -framework SwiftUI -framework Charts -framework WidgetKit Shared/*.swift Widget/BandwagonWidgets.swift -o "$EXT/Contents/MacOS/BandwagonWidgets"
 fi
@@ -25,8 +25,8 @@ app=Path(sys.argv[1]); group=sys.argv[2]
 agents = app/'Contents/Library/LaunchAgents'
 agents.mkdir(parents=True,exist_ok=True)
 (agents/'local.bandwagon.monitor.autostart.plist').write_bytes(plistlib.dumps({'Label':'local.bandwagon.monitor.autostart','BundleProgram':'Contents/MacOS/BandwagonMonitor','ProgramArguments':['BandwagonMonitor','--background'],'RunAtLoad':True,'LimitLoadToSessionType':'Aqua','ProcessType':'Interactive','AssociatedBundleIdentifiers':['local.bandwagon.monitor']}))
-info={'CFBundleExecutable':'BandwagonMonitor','CFBundleIdentifier':'local.bandwagon.monitor','CFBundleName':'搬瓦工监控','CFBundleDisplayName':'搬瓦工监控','CFBundleVersion':'12','CFBundleShortVersionString':'1.4.0','CFBundlePackageType':'APPL','LSMinimumSystemVersion':'14.0','LSUIElement':True,'NSHighResolutionCapable':True,'CFBundleIconFile':'AppIcon','MonitorAppGroup':group,'CFBundleURLTypes':[{'CFBundleURLName':'Monitor widget links','CFBundleURLSchemes':['bandwagon-monitor']} ]}
-ext={'CFBundleExecutable':'BandwagonWidgets','CFBundleIdentifier':'local.bandwagon.monitor.widgets','CFBundleName':'搬瓦工监控','CFBundleDisplayName':'搬瓦工监控','CFBundleVersion':'12','CFBundleShortVersionString':'1.4.0','CFBundlePackageType':'XPC!','CFBundleSupportedPlatforms':['MacOSX'],'LSMinimumSystemVersion':'14.0','MonitorAppGroup':group,'NSExtension':{'NSExtensionPointIdentifier':'com.apple.widgetkit-extension'}}
+info={'CFBundleExecutable':'BandwagonMonitor','CFBundleIdentifier':'local.bandwagon.monitor','CFBundleName':'搬瓦工监控','CFBundleDisplayName':'搬瓦工监控','CFBundleVersion':'13','CFBundleShortVersionString':'1.5.0','CFBundlePackageType':'APPL','LSMinimumSystemVersion':'14.0','LSUIElement':True,'NSHighResolutionCapable':True,'CFBundleIconFile':'AppIcon','MonitorAppGroup':group,'CFBundleURLTypes':[{'CFBundleURLName':'Monitor widget links','CFBundleURLSchemes':['bandwagon-monitor']} ]}
+ext={'CFBundleExecutable':'BandwagonWidgets','CFBundleIdentifier':'local.bandwagon.monitor.widgets','CFBundleName':'搬瓦工监控','CFBundleDisplayName':'搬瓦工监控','CFBundleVersion':'13','CFBundleShortVersionString':'1.5.0','CFBundlePackageType':'XPC!','CFBundleSupportedPlatforms':['MacOSX'],'LSMinimumSystemVersion':'14.0','MonitorAppGroup':group,'NSExtension':{'NSExtensionPointIdentifier':'com.apple.widgetkit-extension'}}
 if sys.argv[4] == '1':
  info['CFBundleIdentifier']='local.bandwagon.monitor.preview'
  info['CFBundleName']='搬瓦工监控演示'

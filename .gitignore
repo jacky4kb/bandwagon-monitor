@@ -20,3 +20,5 @@ dist/
 widget-snapshot.json
 *.xcuserstate
 xcuserdata/
+
+resource-history.json

@@ -29,6 +29,9 @@ struct WidgetSnapshot: Codable {
     var instanceID: String?
     var trend: [UsagePoint]?
     var trendUpdated: Date?
+    var resourceTrend: [ResourcePoint]?
+    var resourceUpdated: Date?
+    var resourceError: Bool?
     static var sample: WidgetSnapshot {
         var s = WidgetSnapshot()
         s.configured = true; s.updated = Date(); s.hostname = "示例 VPS"
@@ -47,6 +50,8 @@ struct WidgetSnapshot: Codable {
             s.trend?.append(UsagePoint(time:date,incoming:incoming,outgoing:outgoing))
         }
         s.trendUpdated = Date()
+        s.resourceTrend = ResourceHistory.demo
+        s.resourceUpdated = s.resourceTrend?.last?.time
         return s
     }
 }

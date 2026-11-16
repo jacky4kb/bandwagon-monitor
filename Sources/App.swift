@@ -32,6 +32,8 @@ enum Page: String, CaseIterable, Identifiable {
     @Published var message: String?
     @Published var interval = 5
     @Published var usageSamples: [UsagePoint] = []
+    @Published var resourceSamples: [ResourcePoint] = []
+    var lastOverviewRequest: Date?
     @Published var showMenuBar = true
     @Published var loginEnabled = false
     @Published var loginStatus = "已关闭"
@@ -70,13 +72,18 @@ enum Page: String, CaseIterable, Identifiable {
         refreshLoginStatus()
         do { key = try Vault.read(veid) ?? "" } catch { message = error.localizedDescription }
         showSettings = !configured
+        resourceSamples = ResourceHistory.read(instanceID:veid)
         startTimer()
     }
     func startTimer() {
         timer?.invalidate()
         guard !demo else { return }
-        timer = Timer.scheduledTimer(withTimeInterval: Double(interval * 60), repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.refresh() }
+        timer = Timer.scheduledTimer(withTimeInterval: 300, repeats: true) { [weak self] _ in
+            Task { @MainActor in
+                guard let self else { return }
+                let overviewDue = self.lastOverviewRequest.map { Date().timeIntervalSince($0) >= Double(self.interval * 60) - 1 } ?? true
+                self.refresh(resourcesOnly: !overviewDue)
+            }
         }
     }
     func configure(id: String, secret: String, minutes: Int) throws {
@@ -87,7 +94,9 @@ enum Page: String, CaseIterable, Identifiable {
         }
         try Vault.save(secret, account: id)
         if !veid.isEmpty && veid != id { try? Vault.delete(veid) }
+        task?.cancel(); loading = false
         veid = id; key = secret; interval = minutes
+        resourceSamples = ResourceHistory.read(instanceID:id)
         UserDefaults.standard.set(id, forKey: "veid"); UserDefaults.standard.set(minutes, forKey: "interval")
         data = [:]; errors = [:]; updated = [:]; usageSamples = []; message = nil; showSettings = false
         startTimer(); refresh()
@@ -95,6 +104,10 @@ enum Page: String, CaseIterable, Identifiable {
     func disconnect() throws {
         guard !demo else { return }
         try Vault.delete(veid)
+        task?.cancel(); loading = false
+        resourceSamples = []
+        do { try ResourceHistory.write([],instanceID:"") }
+        catch { message = "本机资源历史清理失败。" }
         key = ""; veid = ""; data = [:]; errors = [:]; updated = [:]; usageSamples = []
         UserDefaults.standard.removeObject(forKey: "veid"); onUpdate?()
     }
@@ -102,10 +115,11 @@ enum Page: String, CaseIterable, Identifiable {
         self.page = page
         if !loading { refresh(missingOnly: true, includeOverview: false) }
     }
-    func refresh(missingOnly: Bool = false, includeOverview: Bool = true) {
+    func refresh(missingOnly: Bool = false, includeOverview: Bool = true, resourcesOnly: Bool = false) {
         guard !loading, configured, !demo else { return }
-        var endpoints: [Endpoint] = includeOverview ? [.info, .live, .usage] : []
-        for ep in page.endpoints where !endpoints.contains(ep) { endpoints.append(ep) }
+        var endpoints: [Endpoint] = resourcesOnly ? [.live] : includeOverview ? [.info, .live, .usage] : []
+        if includeOverview && !resourcesOnly { lastOverviewRequest = Date() }
+        for ep in (resourcesOnly ? [] : page.endpoints) where !endpoints.contains(ep) { endpoints.append(ep) }
         if missingOnly { endpoints = endpoints.filter { data[$0] == nil && errors[$0] == nil } }
         guard !endpoints.isEmpty else { return }
         loading = true
@@ -114,11 +128,16 @@ enum Page: String, CaseIterable, Identifiable {
             for endpoint in endpoints {
                 do {
                     let result = try await APIClient.fetch(endpoint, veid: id, key: secret)
-                    guard !Task.isCancelled else { break }
+                    guard !Task.isCancelled, veid == id else { return }
                     data[endpoint] = result; errors[endpoint] = nil; updated[endpoint] = Date()
                     if endpoint == .usage { usageSamples = UsageHistory.parse(result) }
+                    if endpoint == .live, let point = ResourceHistory.sample(result) {
+                        resourceSamples = ResourceHistory.append(point,to:resourceSamples)
+                        do { try ResourceHistory.write(resourceSamples,instanceID:id) }
+                        catch { message = "资源历史保存失败，请检查本机存储。" }
+                    }
                 } catch {
-                    guard !Task.isCancelled else { break }
+                    guard !Task.isCancelled, veid == id else { return }
                     errors[endpoint] = error.localizedDescription.replacingOccurrences(of: secret, with: "[已隐藏]")
                 }
                 onUpdate?()
@@ -135,6 +154,9 @@ enum Page: String, CaseIterable, Identifiable {
         if configured {
             snapshot.updated = updated[.info]
             snapshot.instanceID = veid
+            snapshot.resourceTrend = resourceSamples.filter { $0.time >= Date().addingTimeInterval(-86400) }
+            snapshot.resourceUpdated = resourceSamples.last?.time
+            snapshot.resourceError = errors[.live] != nil
             snapshot.trend = UsageHistory.aggregate(usageSamples, days: 7)
             snapshot.trendUpdated = updated[.usage]
             if usageSamples.isEmpty && updated[.usage] == nil {
@@ -145,7 +167,7 @@ enum Page: String, CaseIterable, Identifiable {
             snapshot.remaining = traffic?.remaining; snapshot.total = traffic?.total; snapshot.used = traffic?.used
             snapshot.reset = numeric(info["data_next_reset"])
             let state = live["ve_status"] as? String ?? "—"
-            snapshot.state = ["Running":"运行中", "Stopped":"已关机", "Starting":"启动中"][state] ?? state
+            snapshot.state = ["running":"运行中", "stopped":"已关机", "starting":"启动中"][state.lowercased()] ?? state
             snapshot.load = live["load_average"] as? String ?? "—"
             snapshot.availableRAM = numeric(live["mem_available_kb"]).map { $0 * 1024 }
             snapshot.totalRAM = numeric(info["plan_ram"])
@@ -166,6 +188,7 @@ enum Page: String, CaseIterable, Identifiable {
         catch { message = error.localizedDescription }
     }
     func seedDemo() {
+        resourceSamples = ResourceHistory.demo
         veid = "1234567"
         data[.info] = ["error":0,"hostname":"My Bandwagon VPS","node_alias":"v1234","node_location":"US, Los Angeles","vm_type":"kvm","plan":"KVM • 2 GB / 40 GB","plan_ram":2147483648.0,"plan_swap":1073741824,"plan_disk":42949672960.0,"plan_monthly_data":1073741824000.0,"data_counter":289910292480.0,"monthly_data_multiplier":1,"data_next_reset":Date().addingTimeInterval(12*86400).timeIntervalSince1970,"ip_addresses":["192.0.2.10","2001:db8::/64"],"private_ip_addresses":[],"os":"debian-12-x86_64","suspended":0,"policy_violation":0,"ptr":["192.0.2.10":"vps.example.com"],"ip_nullroutes":[:],"email":"demo@example.com"]
         data[.live] = ["error":0,"ve_status":"Running","load_average":"0.08 0.12 0.09","mem_available_kb":1468006,"swap_total_kb":1048576,"swap_available_kb":1048576,"ve_used_disk_space_b":12884901888.0,"ve_disk_quota_gb":40,"is_cpu_throttled":0,"is_disk_throttled":0,"ssh_port":22,"live_hostname":"my-vps"]
@@ -350,10 +373,11 @@ struct RootView: View {
     }
     var stateText: String {
         let status = value("ve_status", live: true)
-        return ["Running":"运行中","Stopped":"已关机","Starting":"启动中"][status] ?? status
+        return ["running":"运行中","stopped":"已关机","starting":"启动中"][status.lowercased()] ?? status
     }
     var resources: some View {
         Group {
+            ResourceHistoryPanel(points:model.resourceSamples)
             Panel(title: "内存与存储") {
                 InfoRow(label: "内存额度", value: bytes(numeric(model.info["plan_ram"])))
                 InfoRow(label: "可用内存", value: bytes(numeric(model.live["mem_available_kb"]).map { $0 * 1024 }))
@@ -617,7 +641,7 @@ struct SettingsView: View {
             return
         }
         if CommandLine.arguments.contains("--self-test") {
-            do { try selfTest(); try UsageHistory.test(); try SingleInstance.test(); print("All tests passed.") } catch { fputs("\(error)\n", stderr); exit(1) }
+            do { try selfTest(); try UsageHistory.test(); try ResourceHistory.test(); try SingleInstance.test(); print("All tests passed.") } catch { fputs("\(error)\n", stderr); exit(1) }
             return
         }
         let preview = CommandLine.arguments.contains("--demo") || CommandLine.arguments.contains("--preview") || Bundle.main.object(forInfoDictionaryKey:"PreviewOnly") as? Bool == true

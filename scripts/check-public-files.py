@@ -17,7 +17,7 @@ for path in root.rglob('*'):
         issues.append(f'{rel}: application bundle must not be included in public source')
     if path.suffix not in {'.swift','.sh','.py','.md','.txt','.png','.icns'} and path.name not in {'.gitignore','LICENSE'}:
         issues.append(f'{rel}: file type outside public source allowlist')
-    if path.suffix in {'.p12', '.pfx', '.key', '.pem', '.cer', '.mobileprovision', '.provisionprofile', '.entitlements', '.log', '.ips'} or path.name.startswith('.env') or path.name == 'widget-snapshot.json':
+    if path.suffix in {'.p12', '.pfx', '.key', '.pem', '.cer', '.mobileprovision', '.provisionprofile', '.entitlements', '.log', '.ips'} or path.name.startswith('.env') or path.name in {'widget-snapshot.json', 'resource-history.json'}:
         issues.append(f'{rel}: private/generated file type')
     if path.suffix in {'.swift', '.sh', '.py', '.md', '.txt'}:
         text = path.read_text()

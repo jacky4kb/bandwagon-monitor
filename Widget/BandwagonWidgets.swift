@@ -47,8 +47,8 @@ struct MonitorWidgetView: View {
                 }
                 Spacer(minLength: 0)
                 HStack(spacing: 4) {
-                    if s.error != nil { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
-                    if let date = category == "history" ? s.trendUpdated : s.updated { Text(date, style: .time); Text(entry.date.timeIntervalSince(date) > 20 * 60 ? "数据较旧" : "更新") }
+                    if s.error != nil || (category == "resources" && s.resourceError == true) { Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(.orange) }
+                    if let date = category == "history" ? s.trendUpdated : category == "resources" ? s.resourceUpdated : s.updated { Text(date, style: .time); Text(entry.date.timeIntervalSince(date) > 20 * 60 ? "数据较旧" : "更新") }
                     else { Text("等待应用同步") }
                     Spacer(minLength: 0)
                     if family != .systemSmall { Text("点击查看详情") }
@@ -127,23 +127,33 @@ struct MonitorWidgetView: View {
         }.font(.system(size: 10)).foregroundStyle(.secondary)
     }
     var resourceContent: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                metric("运行状态", s.state)
-                metric("可用内存", widgetBytes(s.availableRAM))
-            }
-            row("负载", s.load)
-            row("CPU / 磁盘限速", "\(flag(s.cpuThrottled)) / \(flag(s.diskThrottled))")
+        VStack(alignment:.leading,spacing:family == .systemLarge ? 8 : 4) {
+            Text("近 24 小时 · 每 5 分钟采样").font(.system(size:9)).foregroundStyle(.secondary)
             if family == .systemLarge {
-                Divider()
-                row("内存额度", widgetBytes(s.totalRAM))
-                row("Swap 可用 / 总量", "\(widgetBytes(s.availableSwap)) / \(widgetBytes(s.totalSwap))")
-                row("已映射磁盘", widgetBytes(s.mappedDisk))
-                row("磁盘额度", widgetBytes(s.diskQuota))
-                row("系统", s.os)
-                Text("已映射磁盘空间不等于系统内文件用量。").font(.system(size: 10)).foregroundStyle(.secondary)
+                resourcePlot(memory:false)
+                resourcePlot(memory:true)
+                row("状态 / 内存额度", "\(s.state) / \(widgetBytes(s.totalRAM))")
+                row("CPU / 磁盘限速", "\(flag(s.cpuThrottled)) / \(flag(s.diskThrottled))")
+            } else {
+                HStack(alignment:.top,spacing:12) {
+                    resourcePlot(memory:false)
+                    resourcePlot(memory:true)
+                }
             }
         }
+    }
+    func resourcePlot(memory: Bool) -> some View {
+        let points = (s.resourceTrend ?? []).filter { $0.time >= entry.date.addingTimeInterval(-86400) }
+        let latest = points.last
+        return VStack(alignment:.leading,spacing:3) {
+            HStack {
+                Text(memory ? "可用内存 · GiB" : "CPU 负载 · 1 分钟")
+                if family == .systemLarge { Spacer(minLength:0) }
+            }.font(.system(size:9)).foregroundStyle(.secondary)
+            Text(memory ? widgetBytes(latest?.availableRAM) : latest?.load.map { String(format:"%.3f",$0) } ?? "—")
+                .font(.system(size:17,weight:.semibold,design:.rounded)).foregroundStyle(memory ? Color.blue : mint).lineLimit(1).minimumScaleFactor(0.6)
+            ResourceTrend(points:points,memory:memory,compact:true).frame(height:family == .systemLarge ? 54 : 32)
+        }.frame(maxWidth:.infinity,alignment:.leading)
     }
     var networkContent: some View {
         VStack(alignment: .leading, spacing: 9) {
@@ -190,7 +200,7 @@ struct ResourcesWidget: Widget {
     let kind = "BandwagonResources"
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: kind, provider: MonitorProvider()) { MonitorWidgetView(entry: $0, category: "resources") }
-            .configurationDisplayName("VPS 资源").description("内存、负载、磁盘与限速状态。")
+            .configurationDisplayName("VPS 资源").description("最近 24 小时 CPU 系统负载与可用内存走势；每 5 分钟采样，负载非使用率百分比。")
             .supportedFamilies([.systemMedium,.systemLarge])
     }
 }
